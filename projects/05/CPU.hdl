@@ -1,0 +1,96 @@
+// This file is part of www.nand2tetris.org
+// and the book "The Elements of Computing Systems"
+// by Nisan and Schocken, MIT Press.
+// File name: projects/05/CPU.hdl
+
+/**
+ * The Hack CPU (Central Processing unit), consisting of an ALU,
+ * two registers named A and D, and a program counter named PC.
+ * The CPU is designed to fetch and execute instructions written in 
+ * the Hack machine language. In particular, functions as follows:
+ * Executes the inputted instruction according to the Hack machine 
+ * language specification. The D and A in the language specification
+ * refer to CPU-resident registers, while M refers to the external
+ * memory location addressed by A, i.e. to Memory[A]. The inM input 
+ * holds the value of this location. If the current instruction needs 
+ * to write a value to M, the value is placed in outM, the address 
+ * of the target location is placed in the addressM output, and the 
+ * writeM control bit is asserted. (When writeM==0, any value may 
+ * appear in outM). The outM and writeM outputs are combinational: 
+ * they are affected instantaneously by the execution of the current 
+ * instruction. The addressM and pc outputs are clocked: although they 
+ * are affected by the execution of the current instruction, they commit 
+ * to their new values only in the next time step. If reset==1 then the 
+ * CPU jumps to address 0 (i.e. pc is set to 0 in next time step) rather 
+ * than to the address resulting from executing the current instruction. 
+ */
+
+CHIP CPU {
+
+    IN  inM[16],         // M value input  (M = contents of RAM[A])
+        instruction[16], // Instruction for execution
+        reset;           // Signals whether to re-start the current
+                         // program (reset==1) or continue executing
+                         // the current program (reset==0).
+
+    OUT outM[16],        // M value output
+        writeM,          // Write to M? 
+        addressM[15],    // Address in data memory (of M)
+        pc[15];          // address of next instruction
+
+    PARTS:
+
+    Mux16(a=instruction, b=ALUOutput, sel=instruction[15], out=ARegisterInput);
+
+    // logic for load bit of A register -> defaults to 1 for A-instruction
+    // defaults to value of d1 for C-instruction
+    Not(in=instruction[15], out=notopcode);
+    Or(a=notopcode, b=instruction[5], out=ARegisterLoad);
+
+    // A Register - the load bit is the first d bit in C-instruction
+    // if C-instruction: use d bit, else must be 1??????? -> not opcode OR d1
+    // also handles writeM output
+    ARegister(in=ARegisterInput, load=ARegisterLoad, out=ARegisterOutput, out[0..14]=addressM);
+
+    // sel for this multiplexor is a bit of the C-instruction
+    // a = 0 means use A register; a = 1 means use inM
+    Mux16(a=ARegisterOutput, b=inM, sel=instruction[12], out=ALUInput2);
+
+    // D Register - load bit depends on second d bit in C-instruction => instruction[4]
+    // logic below for asserting load only if C-instruction used
+    And(a=instruction[4], b=instruction[15], out=dLoad); 
+    DRegister(in=ALUOutput, load=dLoad, out=ALUInput1);
+
+    // ALU - c bits are instruction[6..11]
+    ALU(x=ALUInput1, y=ALUInput2,
+    zx=instruction[11], nx=instruction[10], zy=instruction[9], ny=instruction[8], f=instruction[7], no=instruction[6],
+    out=ALUOutput, out=outM, zr=zr, ng=ng);
+
+    // writeM
+    // should use d3 bit -> instruction[3]
+    And(a=instruction[15], b=instruction[3], out=writeM);
+
+    // Load bit for PC - function of jump bits ->
+    // instruction[13..15] and zr, ng
+
+    //over all logic => function of (j1ANDng or j2ANDzr or J3ANDNOTngANDNOTzr) AND (opcode == 1)
+    And(a=ng, b=instruction[2], out=j1andng);
+    And(a=zr, b=instruction[1], out=j2andzr);
+
+    Not(in=ng, out=notng);
+    Not(in=zr, out=notzr);
+
+    And(a=notng, b=notzr, out=notngandnotzr);
+
+    And(a=instruction[0], b=notngandnotzr, out=j3andnotngandnotzr);
+
+    Or(a=j1andng, b=j2andzr, out=j1andngORj2andzr);
+
+    Or(a=j1andngORj2andzr, b=j3andnotngandnotzr, out=prepcload);
+
+    And(a=prepcload, b=instruction[15], out=pcload);
+
+    // Program Counter
+    PC(in=ARegisterOutput, reset=reset, load=pcload, inc=true, out[0..14]=pc);
+
+}
